@@ -1,0 +1,551 @@
+---
+title: "Unveiling the signaling network of FLT3-ITD AML improves drug sensitivity
+  prediction"
+subtitle: "Boolean network generation"
+author: "Veronica Venafra"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+# Define a vector of cell lines
+celllines <- c('JMD', 'TKD')
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+source('./0.libraries.R')
+```
+
+## 1) Normalization of Luminex data for JMD and TKD Cells
+
+The chunk of code below generates the normalized data (see 'Data normalization' paragraph of Methods).
+
+```{r eval=FALSE}
+
+# 1) Normalize raw data 
+for (cellline in celllines){
+  raw_path <- paste0("./input/RAW_", cellline, "_MD.csv")
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  
+  norm<-normalization(raw_path)
+  write.csv(norm, norm_path)
+}
+
+```
+
+The chunck of code below generates the **Figure S3**. The plots represent the Hill curves of raw and normalized data for each analite. The `plot_normalization` function is a custom function in "0.libraries.R" file.
+
+```{r eval=FALSE}
+# 2) Plot raw data against normalized data
+for (cellline in celllines){
+  raw_path <- paste0("./input/RAW_", cellline, "_MD.csv")
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  
+  plot_normalization(raw_path, norm_path, cellline = cellline)
+}
+```
+
+## 2) Plot PCA of experimental conditions
+```{r}
+
+for(cellline in c('JMD', 'TKD')){
+  
+  # Read normalized data
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  normalizeddata<-CNOlist(norm_path)
+  
+  # Convert the MIDAS format in a dataframe
+  norm_df <- from_midas_to_df(normalizeddata)
+  
+  # we want the conditions to be the variables
+  # so we put the conditions as columns
+  norm_df_transpose <- t(norm_df)
+  
+  norm_tib <- as_tibble(norm_df_transpose)
+  norm_tib$analytes <- rownames(norm_df_transpose)
+  
+  norm_tib <- norm_tib %>% relocate(analytes)
+
+  if(cellline == 'JMD'){
+    df_merge <- norm_tib
+  }else{
+    df_merge <- inner_join(df_merge, norm_tib, by = c('analytes'), suffix = c('.JMD', '.TKD'))
+  }
+  
+}
+
+df_merge <- df_merge %>% 
+  relocate(analytes, 'CTRL.JMD') %>%
+  column_to_rownames("analytes")
+
+# we want the conditions to be the variables
+# so we put the conditions as columns
+df_merge_transpose <- t(df_merge)
+
+# convert in tibble
+
+norm_tib <- as_tibble(df_merge_transpose)
+norm_tib$analytes <- rownames(df_merge_transpose)
+
+norm_tib <- norm_tib %>% relocate(analytes)
+
+#create new column for shape attribute, empty string
+
+norm_tib$shape <- ''
+
+#create index for conditions to label with different shape
+#look for names in column with grepl
+#assigne variable to map shape to posistions found
+
+idx_IGF1 <- which(grepl('IGF1', norm_tib$analytes))
+norm_tib$shape[idx_IGF1] <- 'IGF1'
+
+idx_TNFa <- which(grepl('TNF', norm_tib$analytes))
+norm_tib$shape[idx_TNFa] <- 'TNFa'
+
+idx_CTRL <- which(grepl('CTRL', norm_tib$analytes))
+norm_tib$shape[idx_CTRL] <- 'CTRL'
+
+# calculate PCA
+
+col_num <- ncol(norm_tib) #calculate number of columns
+
+#in prcomp col_num-1 because the last column is text, it wants only mumbers
+
+norm_tib <- norm_tib %>% 
+  mutate(cellline = ifelse(grepl('JMD', analytes), 'JMD', 'TKD'))
+
+norm_tib <- norm_tib %>% 
+  mutate(analytes = str_remove_all(analytes, '.JMD|.TKD|IGF1R\\+|IGF1R|\\+IGF1R|TNF\\+|\\+TNF|TNF'))
+
+pca <- prcomp(norm_tib[,2:(col_num-1)],
+              center = TRUE,
+              scale. = TRUE)
+
+pca.plot <- autoplot(pca,
+                     data = norm_tib,
+                      label = FALSE) +
+  theme_classic() +
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  geom_point(size = 5,aes(shape=shape, col = cellline)) +
+  scale_color_manual(values = c('#36437F','#E1BD6A'), labels = c('JMD', 'TKD')) +
+  geom_text_repel(aes(label = norm_tib$analytes))
+                        
+pca.plot
+```
+**Figure 2C** Principal Component Analysis (PCA) of FLT3 ITD-JMD and FLT3 ITD-JMD cells treated upon different perturbations.
+
+## 2) Data pre-processing and integration of data-driven edges
+
+The preprocessing step consists of three phases:
+
+-   *(i) compression*, in which unmeasured and untargeted proteins, as well as linear cascades of undesignated nodes, are removed.
+
+-   *(ii) expansion*, in which the remaining nodes are connected to the upstream regulators with every possible combination of OR/AND Boolean operators. AND operators will be nodes in the network!
+
+-   *(iii) imputation,* in which the software integrates the scaffold model with regulations function inferred without bias from the training dataset.
+
+```{r eval=FALSE}
+
+# set cellline
+pkn_path <- './input/PKN_3008.sif'
+
+for(cellline in celllines){
+  # read experimental data and prior knowledge network
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  CNOlist <- CNOlist(norm_path)
+  pkn <- readSIF(pkn_path)
+  
+  # Compression and Expansion operation according to experimental data
+  model<-preprocessing(data=CNOlist, model=pkn, expansion = TRUE) 
+  
+  # Imputation: integrate data-driven edges with CNOfeeder
+  BTable <- makeBTables(CNOlist=CNOlist, k=2, measErr=c(0.1, 0))
+  Lrank <- linksRanking(CNOlist=CNOlist, measErr=c(0.1, 0), savefile=FALSE)
+  
+  # integrate inferred edges and prior knowledge
+  modelIntegr <- mapBTables2model(BTable=BTable,model=model,allInter=TRUE)
+  
+  modelIntegrWeight <- weighting(modelIntegr=modelIntegr, PKNmodel=model,
+                               CNOlist=CNOlist, integrFac=10)
+  
+  modelIntegrWeight
+  
+  #save expanded model and remove incoming edges in inputs
+  writeSIF(modelIntegrWeight, paste0('./input/integrated_PKN_', cellline, '.sif')) 
+}
+```
+
+The analysis of pre-processing step results reveal that: - JMD model has 206 nodes and xxx edges; - TKD model has 208 nodes and xxx edges;
+
+```{r}
+preprocessed_JMD <- read_tsv(paste0('./input/integrated_PKN_JMD.sif'), 
+                             col_names = c('source','interaction','target'))
+preprocessed_TKD <- read_tsv(paste0('./input/integrated_PKN_TKD.sif'),
+                              col_names = c('source','interaction','target')) 
+
+#write_tsv(preprocessed_TKD, '../input/integrated_PKN_TKD_new.tsv', col_names = FALSE)
+
+TKD_proteins <- unique(c(preprocessed_TKD$source,preprocessed_TKD$target))
+JMD_proteins <- unique(c(preprocessed_JMD$source,preprocessed_JMD$target))
+
+cat(paste0('JMD model has ', length(JMD_proteins), ' nodes and ', nrow(preprocessed_JMD), ' edges\n',
+           'TKD model has ', length(TKD_proteins), ' nodes and ', nrow(preprocessed_TKD), ' edges.\n', 
+           'The differences between the nodes of the two models are just in logic gates: ', 
+           paste0(setdiff(TKD_proteins, JMD_proteins), collapse = ';')))
+```
+
+## 3) Network model optimization
+
+### 3a) Optimization of models using CNOptR algorithm
+
+We performed 1000 runs of optimization using CellNOptR which creates context-specific Boolean models (i) by filtering out interactions not relevant to the system and (ii) by selecting the Boolean operators (i.e., AND/OR) that best integrate inputs acting on the same node. CellNOptR exploits a genetic algorithm that minimizes the difference (mean squared error, mse) between experimental data and the values simulated from the Boolean model. In each optimization run, we selected the best model (lowest mse).
+
+**N.B** This code runs for several hours, so don't run it.
+
+```{r eval=FALSE}
+
+for (cellline in c('JMD', 'TKD')){
+  
+  # read experimental data 
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  CNOlist <- CNOlist(norm_path)
+  
+  # read prior knowledge network integrated with data-driven edges
+  modelT0<- readSIF(paste0('input/integrated_PKN_', cellline, '.sif'))
+  
+  # ### --- MULTIPLE TRAINING --- ###
+  # 
+  ncol = length(modelT0$reacID)
+  # 
+  # inizialize dataframe multiple run
+  optModels <- data.frame(matrix(ncol = ncol, nrow = 0))
+  
+  # list with simulation matrix at t0 and t1 for each optimal model
+  matrix_sim <- list()
+  
+  # create a vector with all possible expanded gates
+  labels <- modelT0$reacID
+  names(optModels) <- labels
+  # 
+  nrun = 1
+  
+  while (nrun <= 1000){
+    
+    print(nrun)
+    train <- gaBinaryT1(CNOlist = CNOlist, 
+                        model = modelT0, 
+                        verbose = FALSE) 
+    
+    simList = prep4sim(modelT0)
+    indexList = indexFinder(CNOlist, modelT0)
+    bString <- train$bString
+    
+    modelCut <- cutModel(modelT0, bString)
+    simListCut <- cutSimList(simList, bString)
+    # t0
+    Sim0 <- simulatorT0(CNOlist=CNOlist, 
+                        model=modelCut, 
+                        simList=simListCut, 
+                        indexLis =indexList)
+    simRes0 <- as.matrix(Sim0[,indexList$signals,drop=FALSE])
+    #simRes0 = Sim0
+    # t1
+    Sim <- simulatorT1(CNOlist=CNOlist, model=modelCut, simList=simListCut, indexList=indexList)
+    simRes <- as.matrix(Sim[,indexList$signals,drop=FALSE])
+    #simRes = Sim
+    
+    simResults <- list(t0=simRes0, t1=simRes)
+    
+    
+    c <- cutAndPlot(model = modelT0, 
+                    bStrings = list(train$bString)[1], #lista di vettori, 
+                    CNOlist = CNOlist,
+                    plotPDF = FALSE,
+                    plotParams = list(margin = 0.3, #margins of boxes
+                                      width = 20, #dimension of single boxes
+                                      height = 8, 
+                                      cmap_scale = 1,
+                                      cex =1, #fontsize of labels
+                                      ymin = NULL,
+                                      maxrow = 7)) #max number of row per single plot
+    
+    # Take t0 and t1 from the cutAndPlot list
+    t0 <- rbind(c$simResults[[1]]$t0, c$simResults[[2]]$t0)
+    t1 <- rbind(c$simResults[[1]]$t1, c$simResults[[2]]$t1)
+    
+    # If some of the cells in the matrix is 0, perform another run of optimization
+    # without updating the counts n_run, because we want to discard that!
+    if(sum(is.na(simResults$t0)) > 0 | sum(is.na(t1)) > 0){
+      next
+    }else{
+      optModels[nrun,]<- train$bString
+      matrix_sim[[nrun]] <- list()
+      matrix_sim[[nrun]] <- simResults
+      matrix_sim[[nrun]]$t1 <- t1
+      nrun <- nrun + 1
+    }
+  }
+  
+  # saving workspace in order to work with results in local
+  if(cellline == 'TKD'){
+    save.image(file = 'TKD_workspace.Rdata')
+  }else{
+    save.image(file = 'JMD_workspace.Rdata')
+  }
+}
+```
+
+### 3b) Family of 100 best model generation
+
+The best models were chosen according to their mean squared error (mse). The first step was **retrieving the mse** from optimized object produced in the server. This is a time consuming operation.
+
+```{r eval=FALSE}
+for(cellline in celllines){
+  # Read integrated PKN with experimental data 
+  pknmodel <- readSIF(paste0('./input/integrated_PKN_', cellline, '.sif'))
+  
+  # Read the normalized Luminex data
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  CNOlist <- CNOlist(norm_path)
+  
+  # Load the 1000 run optimization workspace 
+  # $optModels contains 1000 models
+  load(paste0('./server/', cellline, '_workspace.RData'))
+  
+  # The aim is taking for each optimized model the mean squared error
+  mse <- c()
+  
+  # Create a matrix_sim list that for each optimized model annotates: ....
+  matrix_sim <- list()
+  
+  # Loop on each optimized model
+  for (i in c(1:length(optModels[,1]))){
+    print(i)
+    
+    # To take the mse, we exploit cutAndPlot function
+    # hacking the arguments and putting as bString the binary string 
+    # representing the optimized model in server run
+    c <- cutAndPlot(model = modelT0, 
+                    bStrings = list(as.vector(unlist(unlist(optModels[i,]))))[1],  
+                    CNOlist = CNOlist,
+                    plotPDF = FALSE,
+                    tag = cellline)
+    
+    # The mse is for each species between simulated and experimental
+    # so to obtain an mse for the model, I sum up the mse 
+    mse <- c(mse, sum(c$mse))
+  }
+  write_rds(x = mse, paste0('./results/', cellline, '_mse.RDS'))
+}
+  
+```
+
+Then, we added the mse to the optimized models and sorted them in ascending order according to mse and selected the first 100 models. It is time consuming.
+
+```{r eval=FALSE}
+for(cellline in celllines){
+  
+  # Read integrated PKN with experimental data 
+  pknmodel <- readSIF(paste0('./input/integrated_PKN_', cellline, '.sif'))
+  
+  # Read the normalized Luminex data
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  CNOlist <- CNOlist(norm_path)
+  
+  # Load 1000 run workspace
+  load(paste0('./server/', cellline, '_workspace.RData'))
+  
+  # Read mse vector
+  mse <- read_rds(paste0('./results/', cellline, '_mse.RDS'))
+  
+  optModels_t <- tibble(optModels)
+  optModels_t$mse <- mse
+  
+  # arrange according to mse and select the first 100 models
+  best_100_models <- optModels_t %>% arrange(mse) 
+  best_100_models <- best_100_models[1:100,]
+  best_100_models$mse <- NULL
+
+  mse_thr <- c()
+  
+  matrix_sim_thr <- list()
+  
+  # Loop on each optimized model
+  for (i in c(1:nrow(best_100_models[,1]))){
+    print(i)
+    
+    c <- cutAndPlot(model = modelT0, 
+                    bStrings = list(as.vector(unlist(unlist(best_100_models[i,]))))[1],  
+                    CNOlist = CNOlist,
+                    plotPDF = FALSE,
+                    tag = cellline)
+    
+    mse_thr <- c(mse_thr, sum(c$mse))
+    
+    # Reconstruct a matrix of T0 (before any treatment) and T1 (i condition)
+    # simulated nodes states
+    t0 <- rbind(c$simResults[[1]]$t0, c$simResults[[2]]$t0)
+    t1 <- rbind(c$simResults[[1]]$t1, c$simResults[[2]]$t1)
+    
+    # Compute the difference between the two conditions (simulated fold-change)
+    sim <- t1 - t0
+    
+    if(sum(is.na(t0)) > 0 | sum(is.na(t1)) > 0){
+      next
+    }else{
+      att <- t1 - t0 
+      matrix_sim_thr[[i]] <- att
+    }
+  }
+  
+  write_rds(matrix_sim_thr, paste0('./results/', cellline, '_best_model_matrix.RDS'))
+  
+}
+```
+
+### 3c) Comparison of simulations with experimental data
+
+Once the 100 best model were selected, we calculated the average state of each protein in the 100 best models. This procedure enables quantitative prediction even using Boolean models, which are discrete by nature. These averaged values were compared with the training data to evaluate the goodness of fit.
+
+```{r eval = FALSE}
+for(cellline in celllines){
+  
+  # Read the normalized Luminex data
+  norm_path <- paste0("./input/MD_", cellline, '_NORM.csv')
+  CNOlist <- CNOlist(norm_path)
+  
+  # Read the list with 100 optimized models
+  matrix_sim <- read_rds(paste0('./results/', cellline, '_best_model_matrix.RDS'))
+  
+  # Create a matrix of experimental signals
+  exp <- getSignals(CNOlist)$'90' - getSignals(CNOlist)$'0' 
+  
+  # Create a matrix of simulated data
+  sims <- Filter(Negate(is.null), matrix_sim)
+  average_sim <-  Reduce("+", sims) / length(sims)
+  colnames(average_sim) <- colnames(exp)
+  
+  # Create a matrix of the difference between average simulated data in 100
+  # optimized models and the exerimental data
+  diff <- abs(average_sim - exp)
+  colnames(diff) <- colnames(exp)
+  
+  # Set as rownames the conditions and as column names the analytes
+ 
+  # Get condition names from CNOlist object
+  cond <- CNOlist@cues
+  row.names(cond) <- LETTERS[1:nrow(cond)]
+  colnames(cond)[ colnames(cond) %in% colnames(CNOlist@inhibitors)] <- paste0(  colnames(cond)[ colnames(cond) %in% colnames(CNOlist@inhibitors)], 'i')
+  
+  # Create the conditions (rows) names
+  for(i in c(1:nrow(cond))){
+    rownames(cond)[i] <- paste0(colnames(cond)[cond[i,] == 1], collapse = '+')
+    }
+  
+  conditions <- rownames(cond)
+  
+  colnames(average_sim) <- colnames(exp)
+  rownames(exp) <- conditions
+  rownames(average_sim) <- conditions
+  rownames(diff) <- conditions
+  
+  # Put the three matrices in a list
+  matrices <- list(exp, average_sim, abs(diff))
+
+  write_rds(matrices, file = paste0('./results/', cellline, '_matrices_heatmap.RDS'))
+  
+  cat(paste0(cellline, ':', (max(diff)), ' '))
+}
+```
+
+**Visualization in an heatmap**
+
+```{r eval=FALSE}
+
+for(cellline in celllines){
+  
+  # Read the RDS object of experimental, simulated and errors
+  matrices <- read_rds(paste0('./results/', cellline, '_matrices_heatmap.RDS'))
+  
+  # Since max error is in TKD cell line, set this value for max error color scale 
+  TKDe <- 1.65 #max(diff)
+   
+  # Create an empty list for the three heatmaps 
+  plot_list <- list()
+  plot_title <- c('Experimental in ', 'Simulated in ', 'Difference ')
+  paletteLength <-1000
+  myColor <- colorRampPalette(c("darkblue", "lightyellow", "red3"))(paletteLength)
+  
+  for (i in c(1:length(matrices))){
+    
+    if(cellline == 'JMD' & i == 3){
+      
+      # for the error matrix select only two colors
+      myColor <- colorRampPalette(c("lightyellow", "red3"))(paletteLength)
+      myBreaks <- c(seq(min(matrices[[i]]), TKDe, length.out=paletteLength))
+      
+      # Set errors < 0.5 as white, because are acceptable
+      # get the number of values < 0.5 and subtract it to the length of colors
+      n <- length(myColor)-sum(myBreaks<=0.5)
+      
+      # concatenate a vector of colors with
+      # white of length of numbers < 0.5 and the vector of length of remaining numbers
+      # from first color to the len-n one
+      myNewColor <- c(rep("#FFFFE0", sum(myBreaks<=0.5)), myColor[1:n])
+      myColor <- myNewColor
+    }else{
+      myBreaks <- c(seq(min(matrices[[i]]), 0, length.out=ceiling(paletteLength/2) + 1), 
+                    seq(max(matrices[[i]])/paletteLength, max(matrices[[i]]), length.out=floor(paletteLength/2)))
+      
+      if(cellline == 'TKD' & i == 3){
+        myColor <- colorRampPalette(c("lightyellow", "red3"))(paletteLength)
+        
+        myBreaks <- c(seq(min(matrices[[i]]), max(matrices[[i]]), length.out=paletteLength))
+        n <- length(myColor)-sum(myBreaks<=0.5)
+        myNewColor <- c(rep("#FFFFE0", sum(myBreaks<=0.5)), myColor[1:n])
+        myColor <- myNewColor
+      }
+    }
+    p <- pheatmap(as.matrix(matrices[[i]]),
+                  color = myColor,
+                  cellwidth = 20,
+                  cellheight = 20,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  border_color = 'white',
+                  breaks = unique(myBreaks),
+                  fontsize = 13,
+                  width = 5,
+                  heigth = 30,
+                  labels_col = colnames(matrices[[i]]),
+                  main = paste0(plot_title[i], cellline),
+                  angle_col = c('45'))
+    plot_list[[i]] <- p[[4]]
+  }
+  
+  # Save the plot list for creating the grid
+  write_rds(plot_list, paste0('./results/', cellline, '_plot_list.RDS'))
+  
+  # Save the whole environment image for the simulations
+  save.image(paste0('./results/', cellline, '_subfamily_threshold.RData'))
+
+}
+```
+
+Visualize FLT3-ITD JMD and TKD together
+
+```{r, fig.height=12, fig.width=25, dpi=300}
+plot_list_JMD <- read_rds(paste0('./results/JMD_plot_list.RDS'))
+plot_list_TKD <- read_rds(paste0('./results/TKD_plot_list.RDS'))
+
+plot_list_total <- c(plot_list_JMD, plot_list_TKD)
+grid.arrange(grobs = plot_list_total, ncol = 3, nrow = 2) 
+
+```
+
+**Figure 3A.** Color-coded representations of the experimental activity modulation (T90 -- T0) of sentinel proteins used to train the two Boolean models (*left panel*) and the average prediction of protein activities in the family of 100 best models (*central panel*). The protein activity modulation ranges from -1 to 1 and is represented with a gradient from blue (inhibited) to red (activated). The absolute value of the difference between experimental and simulated protein activity modulation (*right panel*) is reported as a gradient from light yellow (error \< 0.5) to red (1.85). The fit between simulated and experimental data was generally higher in the FLT3 ITD-JMD model, which has been more extensively characterized by the scientific community than the FLT3ITD-TKD system.
+

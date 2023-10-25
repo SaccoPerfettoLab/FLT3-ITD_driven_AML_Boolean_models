@@ -1,0 +1,314 @@
+---
+title: "Unveiling the signaling network of FLT3-ITD AML improves drug sensitivity
+  prediction"
+subtitle: "Combinatory treatments inference"
+author: "Veronica Venafra"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('0.libraries.R')
+```
+
+To identify promising co-treatments able to revert the resistant
+phenotype, we exploited the predictive power of the generated Boolean
+models and performed an *in silico* knock-out of key kinases present in
+the FLT3 ITD-TKD model (ERK1/2, MEK1/2, GSK3A/B, IGF1R, JNK, KRAS,
+MEK1/2, MTOR, PDPK1, PI3K, p38)
+
+### Steady state computation upon each combinatorial inhibition condition
+
+```{r, eval = FALSE}
+
+for(cellline in c('JMD', 'TKD')){
+  
+  # Load the family of 100 best models
+  load(paste0('./results/', cellline, '_subfamily_threshold.RData'))
+  
+  # Get a vector of inhibited kinases in experimental design
+  inhibited <- colnames(CNOlist@inhibitors)
+  
+  # Define the simulation conditions that are inhibited kinases in the 
+  # experimental design and four more key signaling kinases
+  conditions <- c('tumor', inhibited,
+                  'ERK1_2', 'KRAS',
+                  'PDPK1', 'IGF1R')
+  
+  for (condition in conditions){
+    
+    # Define as a baseline that the starting point are all set to 1
+    CNOlist@cues[1,1:3] <- rep(1, 3)
+    CNOlist@cues <- t(as.matrix(CNOlist@cues[1,1:3]))
+    
+    d <- c(1,1,1)
+    names(d) <- c('FLT3', 'TNF', 'IGF1R')
+    CNOlist@stimuli <-  t(as.matrix(d))
+    
+    if(condition == 'tumor'){
+      # -- TUMOR SIMULATION -- #
+      # Remove the FLT3 inhibitor from the design
+      CNOlist@inhibitors[1,1] <- 0
+      CNOlist@inhibitors <- t(as.matrix(CNOlist@inhibitors[1,1]))
+    }else if(condition == 'FLT3'){
+      # -- FLT3 INHBITION CONDITION -- #
+      # Add the inhibition of FLT3 in inhibitors vector
+      in_val <- c(1)
+      names(in_val) <- condition
+      CNOlist@inhibitors <- t(as.matrix(in_val))
+    }else{
+      ## -- FLT3 INHIBITION + ONE TARGET KINASE -- ##
+      # Add the inhibition of FLT3 and a kinase defined in design vector
+      in_val <- c(1, 1)
+      names(in_val) <- c('FLT3', condition)
+      CNOlist@inhibitors <- t(as.matrix(in_val))
+    }
+    
+    ### -- MANUAL SIMULATION -- ##
+    
+    # creating object for simulation
+    simList <- prep4sim(modelT0) 
+    
+    matrix_sim_q <- list()
+    for(i in c(1)){ #select only the best model
+     
+      bString <- as.vector(unlist(best_100_models[i,]))
+    
+      # cutting expanded gates to optimal bString
+      modelCut <- cutModel(modelT0, list(bString)[[1]])
+      
+      # creating a new simList from cutted model
+      newSimList <- cutSimList(simList, list(bString)[[1]])
+      
+      # creating index list
+      indexList <- indexFinder(CNOlist, modelT0)
+      
+      ## ** SIMULATION A T0 (before treatment) ** 
+      simResT0 <- simulatorT1(CNOlist=CNOlist, model=modelCut, simList=newSimList,
+                              indexList=indexList, mode = 0)
+      colnames(simResT0) <- modelT0$namesSpecies
+      
+      ## ** SIMULATION A T1 (after treatment) **
+      simResT1 <- simulatorT1(CNOlist=CNOlist, model=modelCut, simList=newSimList, 
+                              indexList=indexList, mode = 1)
+      colnames(simResT1) <- modelT0$namesSpecies
+      
+      ### -- STORING RESULTS in data objects -- ###
+      # list object
+      simRes <- list(T0 = simResT0, T1 = simResT1)
+      
+      if(sum(is.na(simRes$T0)) > 0 | sum(is.na(simRes$T1)) > 0){
+        matrix_sim_q[[i]] <- list()
+      }else{
+        matrix_sim_q[[i]] <- list()
+        matrix_sim_q[[i]] <- simRes
+      }
+    }
+    
+    matrix_sim_t0 <- lapply(matrix_sim_q, function(x){x$T0})
+    matrix_sim_t0 <- Filter(Negate(is.null), matrix_sim_t0)
+    averaget0 <-  Reduce("+", matrix_sim_t0) / length(matrix_sim_t0)
+    
+    matrix_sim_t1 <- lapply(matrix_sim_q, function(x){x$T1})
+    matrix_sim_t1 <- Filter(Negate(is.null), matrix_sim_t1)
+    averaget1 <-  Reduce("+", matrix_sim_t1) / length(matrix_sim_t1)
+    
+    # matrix object
+    sim_matrix <- matrix(nrow = length(simRes$T0), ncol = 2)
+    
+    sim_matrix[,1] <- t(as.matrix(averaget0)) 
+    sim_matrix[,2] <- t(as.matrix(averaget1))
+    rownames(sim_matrix) <- colnames(simResT1)
+    colnames(sim_matrix) <- c('T0', paste0('FLT3i+',condition,'i'))
+    
+    if(condition == 'tumor'){
+      sim_matrix_new <- sim_matrix
+      conditions_names <- c('T0', 'FLT3-ITD+TNF+IGF')
+      colnames(sim_matrix_new) <- conditions_names
+    }else{
+      conditions_names <- colnames(sim_matrix_new)
+      sim_matrix_new <- cbind(sim_matrix_new, sim_matrix[,2])
+      if(condition == 'FLT3'){
+        colnames(sim_matrix_new) <- c(colnames(sim_matrix_new)[1:length(colnames(sim_matrix_new))-1], 
+                                      paste0(condition,'i'))
+      }else{
+        colnames(sim_matrix_new) <- c(colnames(sim_matrix_new)[1:length(colnames(sim_matrix_new))-1], 
+                                      paste0('FLT3i+',condition,'i'))
+      }
+    }
+  }
+  
+  sim_matrix_new <- sim_matrix_new[,-1] 
+  
+  if(cellline == 'TKD'){
+    sim_matrix_TKD <- sim_matrix_new
+  }else{
+    sim_matrix_JMD <- sim_matrix_new
+  }
+  
+}
+
+sim_tibble_JMD <- tibble(rownames_to_column(data.frame(sim_matrix_JMD), 'node'))
+write_tsv(sim_tibble_JMD, './results/JMD_combinations_simulation_steady_state.tsv')
+
+sim_tibble_TKD <- tibble(rownames_to_column(data.frame(sim_matrix_TKD), 'node'))
+write_tsv(sim_tibble_TKD, './results/TKD_combinations_simulation_steady_state.tsv')
+```
+
+### Inference of Proliferation and Apoptosis
+
+Then we inferred the activity of **APOPTOSIS** and **PROLIFERATION**
+phenotypes. We eventually selected co-treatments in the FLT3 ITD-TKD
+model able to trigger activation levels of the 'apoptosis' and
+'proliferation' to the same level as the FLT3 ITD-JMD model.
+
+```{r, eval = FALSE}
+
+sim_tibble_JMD <- read_tsv('./results/JMD_combinations_simulation_steady_state.tsv')
+sim_tibble_TKD <- read_tsv('./results/TKD_combinations_simulation_steady_state.tsv')
+
+phens <- c('APOPTOSIS', 'PROLIFERATION')
+plot_list <- list()
+
+for(phen_i in 1:length(phens)){
+  phen <- phens[phen_i]
+
+  apoptosis_annotation <- read_tsv('./results/phenotypes_analysis/paths_to_apoptosis_proliferation.txt') %>%
+    select(node = QueryNode, phenotype = EndNode, apoptosis = Final_Effect)
+  
+  apoptosis_annotation <- apoptosis_annotation %>% 
+    filter(phenotype == phen) %>% 
+    select(node, apoptosis)  %>%
+    distinct()
+  
+  for(i in c(1:(ncol(sim_tibble_JMD)-3))){
+    
+    j = i + 3
+    conditions_sim <- colnames(sim_tibble_JMD)[j]
+
+    for(cellline in c('JMD', 'TKD')){
+      
+      if(cellline == 'JMD'){
+        annotated <- left_join(sim_tibble_JMD, apoptosis_annotation %>% 
+                                 select(node, apoptosis), by = 'node')
+        
+        if(phen == 'APOPTOSIS'){
+          annotated <- annotated %>% 
+            filter(node %in% c('MTOR', 'STAT5A'))
+        }else{
+          annotated <- annotated %>% 
+            filter(node %in% c('PI3K', 'MAPK14', 'STAT5A', 'MTOR'))
+          
+        }
+        
+        
+      }else{
+        annotated <- left_join(sim_tibble_TKD, apoptosis_annotation %>% 
+                                 select(node, apoptosis), by = 'node')
+        
+        if(phen == 'APOPTOSIS'){
+          annotated <- annotated %>%
+            filter(node %in% c('STAT5A', 'AKT'))
+        }else{
+          annotated <- annotated %>%
+            filter(node %in% c('PI3K', 'KRAS', 'CREB1', 'STAT5A'))
+        }
+      }
+      
+      annotated <- annotated %>% 
+        select('node', T0 = 2, T10 = 3, T90 = j, apoptosis) %>%
+        filter(!is.na(apoptosis))
+      
+      apo <- annotated %>% 
+        filter(!is.na(apoptosis)) %>%
+        mutate(T0_apo = T0*apoptosis, 
+               T10_apo = T10*apoptosis,
+               T90_apo = T90*apoptosis) %>% 
+        group_by(apoptosis) %>% 
+        summarise(T0 = sum(T0_apo),
+                  T10 = sum(T10_apo),
+                  T90 = sum(T90_apo))
+      
+        apo <- apo %>% summarise(T0 = sum(T0), 
+                                 T10 = sum(T10),
+                                 T90 = sum(T90))
+        
+      if(cellline == 'JMD'){
+        apo$cellline <- 'JMD'
+        apo_JMD <- apo
+        annotated_JMD <- annotated
+      }else{
+        apo$cellline <- 'TKD'
+        apo_TKD <- apo
+        annotated_TKD <- annotated
+      }
+    }
+    apo_tb <- bind_rows(apo_JMD, apo_TKD)
+    
+    if(i == 1){
+      apo_tb_f <- apo_tb
+    }else{
+      sub_apo_tb <- apo_tb %>% select(T90, cellline)
+      colnames(sub_apo_tb) <- c(conditions_sim, 'cellline')
+      apo_tb_f <- left_join(apo_tb_f, sub_apo_tb, by = 'cellline')
+    }
+  }
+  
+  apo_tb_f <- apo_tb_f %>% relocate(cellline)
+
+  apo_matrix <- as.matrix(apo_tb_f %>% 
+                            column_to_rownames('cellline'))
+  
+  a <- data.frame(t(apo_matrix)) %>% rownames_to_column()
+  JMD <- a[, c('rowname', 'JMD')]
+  JMD$rowname <- c('FLT3.TNF.IGF1R', 'FLT3i', 'FLT3i.MAPK14i', JMD$rowname[4:length(rownames(JMD))])
+  colnames(JMD) <- c('time', 'apoptosis')
+  JMD$cellline <- 'JMD'
+  
+  TKD <- a[, c('rowname', 'TKD')]
+  TKD$rowname <- c('FLT3.TNF.IGF1R', 'FLT3i', 'FLT3i.MAPK14i', TKD$rowname[4:length(rownames(TKD))])
+  colnames(TKD) <- c('time', 'apoptosis')
+  TKD$cellline <- 'TKD'
+  
+  barplot_tb <- bind_rows(JMD, TKD) %>% 
+    mutate_at('apoptosis', as.numeric)
+  
+  if(phen == 'APOPTOSIS'){
+    barplot_tb$apoptosis <- barplot_tb$apoptosis * -1
+  }
+  
+  barplot_tb_sub <- barplot_tb
+  
+  barplot_apoptosis <- ggplot(barplot_tb_sub, aes(x = time, y = apoptosis, fill = cellline)) +
+    geom_bar(stat = 'identity', position = 'dodge', width = 0.8) +
+    xlab('') + ylab(phen)+
+    scale_fill_manual(values = c('#36437F','#E1BD6A'))+
+    theme_classic() +
+    ylim(0,7)+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 10),
+          axis.text.y = element_text(size = 10), 
+          axis.title = element_text(size = 12))
+  
+  plot_list[[phen_i]] <- barplot_apoptosis
+}
+
+write_rds(plot_list, './results/plot_list_combinations.rds')
+```
+
+```{r, fig.height=5, fig.width=8, fig.align='center'}
+
+plot_list <- readRDS('./results/plot_list_combinations.rds')
+n <- length(plot_list)
+nCol <- floor(sqrt(n))
+p <- do.call("grid.arrange", c(plot_list, ncol=nCol))
+
+```
+
+**Figure 4B-C.** Bar plot showing the *in silico* simulation of
+proliferation activation and apoptosis inhibition levels in untreated
+and FLT3i conditions in combination with knock-out of each of 10 crucial
+kinases in FLT3 ITD-JMD (blue) and -TKD (yellow) cells. 

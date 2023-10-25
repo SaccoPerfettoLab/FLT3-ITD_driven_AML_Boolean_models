@@ -1,0 +1,105 @@
+---
+title: "Unveiling the signaling network of FLT3-ITD AML improves drug sensitivity
+  prediction"
+subtitle: "Network visualization" 
+author: "Veronica Venafra"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('0.libraries.R')
+```
+
+The optimized models were visualized on Cytoscape. The main steps were:
+
+1.  Create the files in R.
+
+2.  Load the files in Cytoscape.
+
+## 1. File generation in R
+
+To load the models in Cytoscape you need:
+
+-   a *sif file* representing the structure of the optimized model
+-   a file of the *nodes attributes* specifying which species is a
+    sentinel, an inhibited/stimulated protein
+-   a file of the *edge attributes* specifying the frequency of each
+    edge in the family of optimized model.
+
+### Generation of sif file and edges attributes
+
+To generate the sif file of the network and the edge attribute file we
+used the **writeScaffold** function of CNOptR package, rewritten to
+avoid some errors. The code is available in `0.libraries.R` file.
+
+The network file will be: \*[cellline]\_Scaffold.sif *The edge attribute
+file will be:* [cellline]\_weightsScaffold.EA\*
+
+```{r eval = FALSE}
+
+for(cellline in c('JMD', 'TKD')){
+  
+  # Load the family of 100 best model to compute the edge frequency
+  load(paste0('./results/', cellline, '_subfamily_threshold.RData'))
+  
+  # Assign to the train object in the RData environment the family of 100 models
+  # stored in optModels variable. In the writeScaffold function the frequency
+  # of each logic gate in the family of models will be computed.
+  train$stringsTol <- data.matrix(optModels)
+  
+  writeScaffold(
+  modelOriginal = pknmodel,
+  modelComprExpanded = modelT0,
+  optimResT1 = train,
+  optimResT2 = NA,
+  CNOlist = CNOlist,
+  tag = paste0('./results/visualization/', cellline))
+}
+```
+
+### Generation of nodes attributes
+
+The nodes attribute file will be: \*[cellline]\_nodesPKN.attrs\* To
+generate that you have to run the code below and then modify the
+extension of the generate file in '.attrs' and modify the header in
+'Cytocopter.NodesType'.
+
+```{r eval = FALSE}
+pkn_path <- './input/PKN_3008.sif'
+pknmodel <- readSIF(pkn_path)
+
+# get normalized experimental data
+CNOlist <- CNOlist(paste0('./input/MD_', cellline, '_NORM.csv'))
+
+# compress and expand the PKN
+modelT0 <- preprocessing(CNOlist, pknmodel, expansion = TRUE)
+
+# execute the function only to obtain the nodes attributes file!
+writeNetwork(
+  modelOriginal = pknmodel,
+  modelComprExpanded = modelT0,
+  optimResT1 = train,
+  CNOlist = CNOlist,
+  tag = paste0('./results/visualization/', cellline))
+```
+
+## 2. Load files in Cytoscape
+
+Once obtained all the files, we:
+
+1.  Loaded the ***[cellline]\_scaffold.sif.***
+
+2.  Imported as nodes attributes the ***[cellline]\_nodesPKN.attrs***
+
+3.  Imported as edge attributes the
+    ***[cellline]\_weightsScaffold.attrs***
+
+4.  The Cytocopter style was used to color nodes and edges
+
+5.  To obtain the high confidence models we filtered in Cytoscape the
+    edges with Weight \> 0.4.

@@ -1,0 +1,13 @@
+condition	JMD1	JMD_TKD1	JMD2	JMD_TKD2	JMD3	JMD4	JMD5	JMD_TKD3	TKD1	TKD2	JMD6	JMD7	JMD8	JMD_TKD4
+FLT3+ITD+TNF+IGF	2	2	2	2	2	2	2	2	2	2	2	2	2	2
+FLT3i	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0
+FLT3i+MAPK14i	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0
+FLT3i+JNKi	-0	-0	-0	-0	-0	-0	-0	-0	2	1	-0	-0	2	-0
+FLT3i+PI3Ki	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0
+FLT3i+MTORi	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	1	-0
+FLT3i+MEK1_2i	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0
+FLT3i+GSK3Bi	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0
+FLT3i+GSK3Ai	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0
+FLT3i+ERK1_2i	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	-0	-0
+FLT3i+KRASi	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0
+FLT3i+PDPK1i	-0	-0	-0	-0	-0	-0	-0	-0	2	2	-0	-0	2	-0

@@ -1,0 +1,268 @@
+---
+title: "Unveiling the signaling network of FLT3-ITD AML improves drug sensitivity prediction"
+subtitle: "FLT3-ITD patients: Functional impact annotation of mutations"
+author: "Veronica Venafra"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+source('0.libraries.R')
+```
+
+## OncoKB Annotation
+
+The maf files containing the mutations of each patient were annotated with 
+OncoKB™ annotator (Chakravarty et al., 2016) to obtain the mutation effect 
+on protein function and oncogenicity. In the following code,
+we filtered out variants with MUTATION_EFFECT equal to ‘Unknown’, ‘Inconclusive’, ‘Likely Neutral’, and ‘Switch-of-function’.
+
+The code below creates the *sheet 2* of **Table S5**.
+```{r eval=FALSE}
+
+onco_p <- read_tsv('./input/oncokb-annotator/all_patients_onco.maf')
+
+onco_p_new_col <- onco_p %>% 
+  dplyr::select(Tumor_Sample_Barcode, 
+         Hugo_Symbol, Entrez_Gene_Id, 
+         Chromosome, Start_Position, End_Position, Strand, 
+         HGVSc, HGVSp, HGVSp_Short, 
+         MUTATION_EFFECT, ONCOGENIC)
+
+# filter all mutations except the ones not known
+onco_p_new_col_k <- onco_p_new_col  %>% filter(MUTATION_EFFECT != 'Unknown' & 
+                                               MUTATION_EFFECT != 'Inconclusive' & 
+                                               MUTATION_EFFECT != 'Likely Neutral' &
+                                               MUTATION_EFFECT != 'Switch-of-function') 
+
+write_tsv(onco_p_new_col, './result/oncokb/oncokb_annotated_filtered.maf')
+```
+
+## Binarization of mutations impacting protein function
+
+The binarization process consists in converting:
+- Gain of Function mutation as 2.
+- Loss of Function mutation as 1.
+- No mutation as 0.
+
+The result of this code is **Table S5**, sheet 3.
+
+```{r, eval = FALSE,warning=FALSE}
+
+onco_p_new_col <- read_tsv('./result/oncokb/oncokb_annotated_filtered.maf')
+onco_p_new_col$MUT_CODE[grepl('Loss', onco_p_new_col$MUTATION_EFFECT)] <- 0
+onco_p_new_col$MUT_CODE[grepl('Gain', onco_p_new_col$MUTATION_EFFECT)] <- 1
+
+mutation_matrix <- onco_p_new_col %>% dplyr::select(Hugo_Symbol, Tumor_Sample_Barcode, MUT_CODE) %>% distinct() 
+
+clust_tib <- pivot_wider(mutation_matrix, names_from = Hugo_Symbol, values_from = MUT_CODE)
+
+clust_tib[,'FLT3'] <- 2 # everyone has FLT3-ITD
+clust_tib[clust_tib==1] <- 2 #gain of function
+clust_tib[clust_tib==0] <- 1 #loss of function
+clust_tib[is.na(clust_tib)] <- 0
+
+write_tsv(clust_tib, './result/oncokb/mutational_profile_whole.tsv')
+```
+
+## Visualization
+
+### Clustering of mutations
+```{r, fig.align='center', fig.width=3, fig.height=3,warning=FALSE}
+
+onco_p_new_col <- read_tsv('./result/oncokb/oncokb_annotated_filtered.maf', show_col_types = FALSE)
+onco_p_new_col$MUT_CODE[grepl('Loss', onco_p_new_col$MUTATION_EFFECT)] <- 0
+onco_p_new_col$MUT_CODE[grepl('Gain', onco_p_new_col$MUTATION_EFFECT)] <- 1
+
+mutation_matrix <- onco_p_new_col %>% 
+  dplyr::select(Hugo_Symbol, Tumor_Sample_Barcode = type, MUT_CODE) %>% 
+  distinct() 
+
+clust_tib <- pivot_wider(mutation_matrix, names_from = Hugo_Symbol, values_from = MUT_CODE)
+
+clust_tib <- clust_tib %>% 
+  column_to_rownames('Tumor_Sample_Barcode')
+
+clust_tib <- clust_tib %>% 
+  mutate_all(as.numeric)
+
+clust_tib[,'FLT3'] <- 2 # everyone has FLT3-ITD
+clust_tib[clust_tib==1] <- 2 #gain of function
+clust_tib[clust_tib==0] <- 1 #loss of function
+clust_tib[is.na(clust_tib)] <- 0
+
+whole_d = dist(clust_tib, method = 'euclidean')
+whole_hc = hclust(whole_d, method = 'complete')
+
+hc_plot <- ggdendrogram(whole_hc, theme_dendro = TRUE) +
+  theme(axis.line.y = element_line(colour = 'darkgrey'),
+        axis.ticks.y = element_line())
+
+hc_plot
+```
+**Figure 5C**. Clustering according to the mutational profile of each patient.
+
+### Heatmap of mutations
+
+```{r, fig.width=20, fig.height=3}
+
+onco_p_new_col <- read_tsv('./result/oncokb/oncokb_annotated_filtered.maf', show_col_types = FALSE)
+onco_p_new_col$MUT_CODE[grepl('Loss', onco_p_new_col$MUTATION_EFFECT)] <- 0
+onco_p_new_col$MUT_CODE[grepl('Gain', onco_p_new_col$MUTATION_EFFECT)] <- 1
+
+mutation_matrix <- onco_p_new_col %>% 
+  dplyr::select(Hugo_Symbol, Tumor_Sample_Barcode, MUT_CODE) %>% 
+  distinct() 
+
+clust_tib <- pivot_wider(mutation_matrix, names_from = Hugo_Symbol, values_from = MUT_CODE)
+
+clust_tib <- clust_tib %>% 
+  column_to_rownames('Tumor_Sample_Barcode')
+
+clust_tib <- clust_tib %>% 
+  mutate_all(as.numeric)
+
+clust_tib[,'FLT3'] <- 2 # everyone has FLT3-ITD
+clust_tib[clust_tib==1] <- 2 #gain of function
+clust_tib[clust_tib==0] <- 1 #loss of function
+clust_tib[is.na(clust_tib)] <- 0
+
+myColor <- colorRampPalette(c("white", 'darkblue',"red3"))(3)
+
+# annotate columns for AML driver genes
+aml_genes <- c('FLT3','KRAS','NRAS','KIT','PTPN11','NF1','DNMT3A','IDH1',
+               'IDH2','TET2','ASXL1','EZH2','KMT2A','NPM1','CEBPA',
+               'RUNX1','GATA2','TP53','SRSF2','U2AF1','SF3B1','ZRSR2','RAD21',
+               'STAG1','STAG2','SMC1A','SMC3')
+
+col_anno <- tibble(genes = names(clust_tib), anno = c(rep('', length(names(clust_tib)))))
+col_anno$anno[col_anno$genes %in% aml_genes] <- 'AML'
+col_anno <- col_anno %>% column_to_rownames('genes')
+
+
+p <- pheatmap(clust_tib,
+              color = myColor,
+              annotation_col = col_anno,
+              #display_numbers = TRUE,
+              cellwidth = 10,
+              cellheight = 10,
+              cluster_rows = TRUE,
+              cluster_cols = FALSE,
+              border_color = 'grey',
+              #breaks = breaks,
+              #legend_breaks = -100,
+              fontsize = 6,
+              width = 5,
+              heigth = 30,
+              angle_col = c('45'))
+
+```
+
+**Figure S6A** Mutational landscape of FLT3-ITD patients.
+
+### Barplot of average mutations burden
+
+```{r, fig.height=3, fig.width=5, fig.align='center'}
+
+# Read mutation data and the mapping of ITD classification to patient ID
+mutations_df <- read_tsv('./result/oncokb/mutational_profile_whole.tsv')
+
+mapping <- read_tsv('./result/getitd/mapping_getitd_patientID.tsv')
+
+mutations <- inner_join(mutations_df, 
+                        mapping %>% dplyr::select(sample, type), 
+                        by = c('Tumor_Sample_Barcode' = 'sample'))
+mutations$Tumor_Sample_Barcode <- NULL
+mutations <- mutations %>% rename('type' = 'sample')
+
+# Average mutation burden
+mutations_t <- t(mutations)
+
+mutations <- mutations %>% column_to_rownames('sample')
+round(rowSums(mutations,  na.rm=TRUE)/nrow(mutations_t)*100,0) -> v
+
+count_mut_df <- tibble(patients = names(v), mean = v)
+
+count_mut_df <- inner_join(count_mut_df, 
+                           mapping %>% 
+                             dplyr::select(type, mutation), 
+                           by = c('patients' = 'type'))
+
+plot <- ggplot(count_mut_df, aes(x = patients, y = mean, fill = mutation)) + 
+  geom_bar(stat = 'identity', width = 0.7) +
+  scale_fill_manual(values = c('#35427F', '#35427F','#E1BE6A'))+
+  geom_hline(yintercept = 55, col ='red')+
+  xlab('')+
+  ylab('average mutation burden')+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 10),
+        axis.text.y = element_text(size = 10), 
+        axis.title = element_text(size = 12))
+
+plot
+```
+
+**Figure S6B** Bar plot reporting the number of mutations for each patient. The red line represents the average number of mutations (55).
+
+### Mutational profile of model genes
+
+```{r, fig.align='center', fig.width = 5, fig.height=3}
+onco_p_new_col <- read_tsv('./result/oncokb/oncokb_annotated_filtered.maf', show_col_types = FALSE)
+onco_p_new_col$MUT_CODE[grepl('Loss', onco_p_new_col$MUTATION_EFFECT)] <- 0
+onco_p_new_col$MUT_CODE[grepl('Gain', onco_p_new_col$MUTATION_EFFECT)] <- 1
+
+mutation_matrix <- onco_p_new_col %>% 
+  dplyr::select(Hugo_Symbol, Tumor_Sample_Barcode = type, MUT_CODE) %>% 
+  distinct() 
+
+clust_tib <- pivot_wider(mutation_matrix, names_from = Hugo_Symbol, values_from = MUT_CODE)
+
+clust_tib <- clust_tib %>% 
+  column_to_rownames('Tumor_Sample_Barcode')
+
+clust_tib <- clust_tib %>% 
+  mutate_all(as.numeric)
+
+clust_tib[,'FLT3'] <- 2 # everyone has FLT3-ITD
+clust_tib[clust_tib==1] <- 2 #gain of function
+clust_tib[clust_tib==0] <- 1 #loss of function
+clust_tib[is.na(clust_tib)] <- 0
+
+
+
+# create files
+model_nodes <- c('AKT','CBL','CREB1','ERK1/2','FLT3','GRB2','GSK3A',
+                 'GSK3B','IGF1R','INSR','IRS1','JNK','KIT','KRAS',
+                 'MAPK14','MEK1/2','MTOR','PDPK1','PI3K','PTEN','PTPN1',
+                 'PTPN11','RPS6','RPS6KA1','RPS6KB1','SHC1','STAT3','STAT5A','TNF','TSC2')
+
+model_clust_tb <- clust_tib[, colnames(clust_tib) %in% model_nodes] 
+
+write_tsv(model_clust_tb %>% 
+            rownames_to_column('Patient'), 
+          './result/oncokb/mutational_profile_model_code.tsv')
+
+myColor <- colorRampPalette(c("white", 'darkblue',"red3"))(3)
+
+p <- pheatmap(t(model_clust_tb),
+              color = myColor,
+              #display_numbers = TRUE,
+              cellwidth = 8,
+              cellheight = 8,
+              cluster_rows = FALSE,
+              cluster_cols = TRUE,
+              border_color = 'lightgrey',
+              #breaks = breaks,
+              #legend_breaks = -100,
+              fontsize = 6,
+              width = 5,
+              heigth = 30,
+              angle_col = c('90'))
+
+p
+```
+**Figure S6D** Heatmap reporting the mutational profile of patients restricted to genes present in the cell-derived Boolean model. White, blue and red squares represent wild type genes, ‘Loss Of Function’ (LOF) and ‘Gain Of Function’ (GOF) mutations, respectively.
+
+

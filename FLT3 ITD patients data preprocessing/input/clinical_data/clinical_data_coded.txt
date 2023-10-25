@@ -1,0 +1,15 @@
+Code	FLT3_subtype	vital_status	recurrency	ITD_number
+FF	JMD3	1	0	2
+RL_1	TKD1	0	0	1
+SE	JMD6	0	0	2
+SF	JMD7	0	0	2
+DNF	JMD2	0	0	1
+FE	JMD_TKD2	1	2	5
+MD	JMD5	1	1	3
+NG	JMD_TKD3	1	2	5
+AR	JMD1	0	0	2
+RL_2	TKD2	0	3	1
+DN	JMD_TKD1			5
+LS	JMD4			1
+SM	JMD8			1
+TR	JMD_TKD4			2

@@ -1,0 +1,201 @@
+---
+title: "Unveiling the signaling network of FLT3-ITD AML improves drug sensitivity prediction"
+subtitle: "FLT3-ITD patients: RNAseq analysis of 262 genes"
+author: "Veronica Venafra"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+source('0.libraries.R')
+```
+
+## From BAM to raw counts
+Gene counts tables were generated from bam files using Rsubread. 
+```{r eval = FALSE}
+
+# Path of hard disk where company data were stored
+hd_path <- '/Volumes/EXT_DISK/AML_FLT3_Sequencing/BWA_mapping/'
+patients <- c('AR', 'DN', 'DNF', 'FE', 'FF', 'LS', 'MD', 'NG', 'RL_1',
+              'RL_2', 'SE', 'SF', 'SM', 'TR')
+
+fc <- featureCounts(files = paste0(hd_path, patients, '.deduped.bam'),
+              annot.inbuilt = 'hg38', 
+              isPairedEnd = TRUE, nthreads = 12)
+
+df <- fc$counts
+df <- data.frame(df) %>% rownames_to_column() %>% as_tibble() %>% 
+  dplyr::rename(GeneID = rowname)
+
+# keep only genes with at least one read
+genes <- df %>% filter(!if_all(.cols = where(is.numeric), ~ .x == 0))
+
+# translate ENSEMBL ID in Gene name
+gene_name <- getSYMBOL(x = genes$GeneID, data = 'org.Hs.eg.db')
+mapping_df <- tibble(GeneID = names(gene_name), gene_name)
+genes <- left_join(genes, mapping_df, by = 'GeneID') %>% 
+  relocate(GeneID, gene_name) %>%
+  arrange(gene_name)
+
+write_tsv(genes, './result/rnaseq/raw_count_matrix.tsv')
+```
+
+## Annotate sample according to ITD location
+
+```{r eval = FALSE}
+
+# 1) countData derived from Rsubread package (BAM files -> to raw counts)
+cts <- read_tsv('./result/rnaseq/raw_count_matrix.tsv')
+classified <- read_tsv('./result/getitd/getitd_compact_res_custom.tsv')
+
+classified$type[grepl('JMD\\+', classified$mutation)] <- paste0('JMD_TKD', 1:sum(grepl('JMD\\+', classified$mutation)))
+classified$type[grepl('JMD$', classified$mutation)] <- paste0('JMD', 1:sum(grepl('JMD$', classified$mutation)))
+classified$type[grepl('^TKD$', classified$mutation)] <- paste0('TKD', 1:sum(grepl('^TKD$', classified$mutation)))
+
+write_tsv(classified, './result/getitd/mapping_getitd_patientID.tsv')
+
+colnames(cts)[3:length(colnames(cts))] <- str_sub(colnames(cts)[3:length(colnames(cts))], 1,4)
+colnames(cts)[3:length(colnames(cts))] <- str_remove_all(colnames(cts)[3:length(colnames(cts))], '.d')
+colnames(cts)[3:length(colnames(cts))] <- str_remove_all(colnames(cts)[3:length(colnames(cts))], '\\.')
+colnames(cts)[3:length(colnames(cts))] <- str_replace_all(colnames(cts)[3:length(colnames(cts))], '_', '.')
+
+#cts <- cts %>% select(-c('RL.2'))
+
+#rename columns according to ITD classification
+v <- classified$type[match(colnames(cts)[3:length(colnames(cts))], classified$sample)]
+colnames(cts)[3:length(colnames(cts))] <- v
+write_tsv(cts, './result/rnaseq/count_matrix_flt3_annotated.tsv')
+
+# 2) colData construction
+colData <- data.frame(condition = rep('a', length(v)))
+rownames(colData) <- v
+
+colData$condition[grepl('^JMD', rownames(colData))] <- 'JMD'
+colData$condition[grepl('^TKD', rownames(colData))] <- 'TKD'
+colData$condition[grepl('^JMD_', rownames(colData))] <- 'JMD_TKD'
+
+# create cts1 with columns same as colData
+cts1 <- cts %>% column_to_rownames('GeneID') 
+cts1 <- cts1[, rownames(colData)]
+
+all(rownames(colData) == colnames(cts1))
+
+# create deseqdataset
+dds <- DESeqDataSetFromMatrix(countData = cts1,
+                              colData = colData,
+                              design = ~ condition)
+
+# add as features the gene_names of geneID
+featureData <- data.frame(gene = cts$gene_name)
+rownames(featureData) <- rownames(cts1)
+
+mcols(dds) <- DataFrame(mcols(dds), featureData)
+
+write_rds(dds, './result/rnaseq/dds_object.rds')
+```
+
+## Normalization with edgeR and z-score computation
+
+```{r eval = FALSE}
+
+# Read input data
+cts <- read_tsv('./result/deseq2/count_matrix_flt3_annotated.tsv')
+dds <- readRDS('./result/deseq2/dds_object.rds')
+
+cts$gene_name <- NULL
+cts <- cts %>% 
+  column_to_rownames('GeneID')
+
+# Counts threshold to obtain exactly the number of sequenced genes 262
+keep <- rowSums(counts(dds) >= 3950) >= 8
+dds1 <- dds[keep,]
+
+raw_counts <- counts(dds1, normalized=FALSE)
+
+# Define groups
+group <- dds$condition
+
+y <- DGEList(counts=raw_counts,group=group)
+y <- calcNormFactors(y)
+
+# Get normalized counts
+norm_counts <- data.frame(y$counts)
+
+# Logarithmic transformation
+norm_counts_log2 <- data.frame(log2(norm_counts)) %>% 
+  rownames_to_column('geneID')
+
+gene_IDs <- tibble(geneID = rownames(mcols(dds1)), 
+                   gene_name = mcols(dds1)$gene)
+
+norm_counts_log2 <- inner_join(norm_counts_log2, 
+                               gene_IDs) %>% 
+  relocate(geneID, gene_name)
+
+# Compute z-score
+mean_v <- colMeans(norm_counts_log2[3:ncol(norm_counts_log2)])
+sd_v <- colSds(as.matrix(norm_counts_log2[sapply(norm_counts_log2, is.numeric)]))
+names(sd_v) <- names(mean_v)
+
+norm_counts_log2_z <- norm_counts_log2
+for(patient in names(mean_v)){
+  norm_counts_log2_z[, patient] <- (norm_counts_log2[,patient] - mean_v[patient])/sd_v[patient] 
+}
+
+write_tsv(norm_counts_log2_z, './result/rnaseq/zscore.tsv')
+```
+
+## Visualization
+
+### Clustering 
+
+```{r, fig.height=3, fig.width=5, fig.align='center'}
+
+norm_counts_log2_z <- read_tsv('./result/rnaseq/zscore.tsv') 
+norm_counts_log2_z <- norm_counts_log2_z %>% dplyr::select(-c('geneID'))
+
+norm_counts_log2_z <- norm_counts_log2_z %>% column_to_rownames('gene_name')
+norm_counts_log2_z_t <- t(norm_counts_log2_z)
+
+z_dist = dist(norm_counts_log2_z_t, method = 'euclidean')
+z_hc = hclust(z_dist, method = 'complete')
+
+z_plot <- ggdendrogram(z_hc, theme_dendro = TRUE) +
+  theme(axis.line.y = element_line(colour = 'darkgrey'),
+        axis.ticks.y = element_line()) 
+z_plot
+```
+
+**Figure 5D** Hierarchical clustering of patients according to their expression profile of 262 genes.
+
+### PCA
+
+```{r eval = FALSE}
+
+# Read DeSeq2 object
+dds <- readRDS('./result/rnaseq/dds_object.rds')
+
+# threshold to obtain exactly the number of sequenced genes 262
+keep <- rowSums(counts(dds) >= 3950) >= 8
+dds1 <- dds[keep,]
+rld <- rlog(dds, blind = TRUE)
+
+p <- plotPCA1(rld)
+
+PCA <- p +
+  theme_classic() +
+  scale_color_brewer(palette = 'Dark2') +
+  theme(legend.title = element_blank())
+
+write_rds(PCA, './result/rnaseq/PCA.rds')
+```
+
+```{r, fig.height=4, fig.width=5, fig.align='center'}
+PCA_plot <- read_rds('./result/rnaseq/PCA.rds')
+PCA_plot
+```
+
+**Figure S6C** Principal Component Analysis (PCA) of patients’ expression profile.
+
+
