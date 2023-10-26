@@ -11,13 +11,20 @@ Read the full paper on [eLife journal](https://doi.org/10.7554/eLife.90532.1)
 The repository has two main directories:
 
 -   *Boolean model and simulations:* it contains the code to (i) generate and visualize the cell-derived FLT3-ITD Boolean models, (ii) perform simulations of both cells and patients. The code is divided in:
-A) [Model generation](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/A.Model_generation.html)
-B) [Model visualization](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/B.Model_visualization.html)
-C) [In silico validation](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/C.In_silico_validation.html)
-D) [Combinatory treatment inference](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/D.Combinatory_treatment_inference.html)
-E) [Patients simulation on cell-derived Boolean models](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/E.Patients_simulations.html)
+
+    -   A. [Model generation](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/A.Model_generation.html)
+
+    -   B. [Model visualization](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/B.Model_visualization.html)
+
+    -   C. [In silico validation](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/C.In_silico_validation.html)
+
+    -   D. [Combinatory treatment inference](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/D.Combinatory_treatment_inference.html)
+
+    -   E. [Patients simulation on cell-derived Boolean models](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/Boolean%20model%20and%20simulations/E.Patients_simulations.html)
+
+<!-- -->
 
 -   *FLT3 ITD patients data preprocessing:* it contains the code to process FLT3 ITD patients data.
-1. [FLT3-ITD localization in 14 patients AML cohort](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/FLT3%20ITD%20patients%20data%20preprocessing/1.FLT3_ITD_annotation.html)
-2. [Annotation of functional impact of other mutations](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/FLT3%20ITD%20patients%20data%20preprocessing/2.Mutation_annotation.html)
-3. [RNA-seq processing](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/FLT3%20ITD%20patients%20data%20preprocessing/3.-RNA-seq-processing.html)
+    -   1\. [FLT3-ITD localization in 14 patients AML cohort](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/FLT3%20ITD%20patients%20data%20preprocessing/1.FLT3_ITD_annotation.html)
+    -   2\. [Annotation of functional impact of other mutations](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/FLT3%20ITD%20patients%20data%20preprocessing/2.Mutation_annotation.html)
+    -   3\. [RNA-seq processing](https://raw.githack.com/SaccoPerfettoLab/FLT3-ITD_driven_AML_Boolean_models/main/FLT3%20ITD%20patients%20data%20preprocessing/3.-RNA-seq-processing.html)
