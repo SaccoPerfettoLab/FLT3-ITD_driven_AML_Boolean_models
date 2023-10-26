@@ -48,7 +48,7 @@ for (cellline in celllines){
 ```
 
 ## 2) Plot PCA of experimental conditions
-```{r}
+```{r, fig.align='center'}
 
 for(cellline in c('JMD', 'TKD')){
   
