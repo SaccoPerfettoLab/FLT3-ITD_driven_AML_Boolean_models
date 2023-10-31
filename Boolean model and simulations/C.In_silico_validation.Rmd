@@ -332,8 +332,13 @@ for(i_phen in c(1:length(phens))){
   
   apoptosis_phen <- cell_simulation_tb %>% column_to_rownames('node')
   
+ 
   apoptosis_phen <- apoptosis_phen*apoptosis_phen$apoptosis
   apoptosis_phen$apoptosis <- NULL
+  
+  if(phen == 'APOPTOSIS'){
+    apoptosis_phen = apoptosis_phen * -1
+  }
   
   myColor <- colorRampPalette(c("darkblue", "white", "red3"))(3)
   
